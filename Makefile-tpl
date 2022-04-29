@@ -226,12 +226,15 @@ servicedb: cluster/db--deploy-sa-svc-etc.yaml cluster/db--vs.yaml cluster/db--sm
 	$(KCNS) apply -f cluster/db--sm.yaml
 	$(KCNS) apply -f cluster/dyndb--se-vs.yaml
 
-# --- bounce-s1: restart the s1 service
+# --- bounce-s1: Restart the s1 service
 bounce-s1:
 	$(KCNS) rollout -n $(APP_NS) restart deployment/cmpt756s1
 
-# --- bounce-s2: restart the s2 service
-bounce-s2: cluster/s2--deploy_$(S2_VER).yaml
+# --- bounce-s2: Restart the s2 service (rebuild if necessary).
+#                NB: the dependency on $(LOG_DIR)/s2-$(S2_VER).repo.log here triggers a
+#                    build/push of the image if the service's source changes. Refer to the 
+#                    dependency of $(LOG_DIR)/s2-$(S2_VER).repo.log further down.
+bounce-s2: $(LOG_DIR)/s2-$(S2_VER).repo.log cluster/s2--deploy_$(S2_VER).yaml
 	$(KCNS) -n $(APP_NS) apply -f cluster/s2--deploy_$(S2_VER).yaml 
 	$(KCNS) rollout -n $(APP_NS) restart deployment/cmpt756s2-$(S2_VER)
 
