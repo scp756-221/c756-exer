@@ -94,7 +94,7 @@ The CI material at `ci` and `.github/workflows` are presently designed for Assig
 │       ├── ./ci/v1.1/Dockerfile
 ...
 │       └── ./ci/v1.1/test_music.py
-`
+```
 
 The bulk of the material for working with our application is inside `cluster`.
 ``` 
