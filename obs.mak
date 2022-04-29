@@ -42,8 +42,8 @@ init-helm:
 # Grafana is included within this Prometheus package
 install-prom:
 	$(HELM) install $(RELEASE) -f cluster/supplemental/helm-kube-stack-values.yaml --namespace $(ISTIO_NS) prometheus-community/kube-prometheus-stack | tee -a $(LOG_DIR)/obs-install-prometheus.log
-	kubectl apply -n $(ISTIO_NS) -f cluster/monitoring--svcs.yaml | tee -a $(LOG_DIR)/obs-install-prometheus.log
-	kubectl -n $(ISTIO_NS) create configmap c756-dashboard --from-file=cluster/supplemental/k8s-dashboard.json
+	kubectl apply -n $(ISTIO_NS) -f cluster/supplemental/monitoring--svcs.yaml | tee -a $(LOG_DIR)/obs-install-prometheus.log
+	kubectl -n $(ISTIO_NS) create configmap c756-dashboard --from-file=cluster/supplemental/k8s-dashboard.json || true
 #   Sidecar loads all ConfigMaps with the label grafana_dashboard
 	kubectl -n $(ISTIO_NS) label configmap c756-dashboard --overwrite=true grafana_dashboard=1
 
@@ -57,10 +57,10 @@ install-kiali:
 	kubectl create namespace $(KIALI_OP_NS) || true  | tee -a $(LOG_DIR)/obs-kiali.log
 	$(HELM) install --set cr.create=true --set cr.namespace=$(ISTIO_NS) --namespace $(KIALI_OP_NS) \
 		--repo https://kiali.org/helm-charts --version $(KIALI_VER) kiali-operator kiali-operator | tee -a $(LOG_DIR)/obs-kiali.log
-	kubectl apply -n $(ISTIO_NS) -f cluster/kiali--cr.yaml | tee -a $(LOG_DIR)/obs-kiali.log
+	kubectl apply -n $(ISTIO_NS) -f cluster/supplemental/kiali--cr.yaml | tee -a $(LOG_DIR)/obs-kiali.log
 	
 update-kiali:
-	kubectl apply -n $(ISTIO_NS) -f cluster/kiali--cr.yaml | tee -a $(LOG_DIR)/obs-kiali.log
+	kubectl apply -n $(ISTIO_NS) -f cluster/supplemental/kiali--cr.yaml | tee -a $(LOG_DIR)/obs-kiali.log
 
 uninstall-kiali:
 	$(HELM) uninstall kiali-operator --namespace $(KIALI_OP_NS) | tee -a $(LOG_DIR)/obs-uninstall-kiali.log

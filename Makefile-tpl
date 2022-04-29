@@ -41,7 +41,7 @@ APP_NS=c756ns
 ISTIO_NS=istio-system
 
 # These should be in your search path
-AWSPR=aws $(AWSPROF) --region $(REGION)
+AWSPR=aws $(AWSPROF) --region $(AWS_REGION)
 DK=docker
 IC=istioctl
 KCNS=kubectl -n $(APP_NS)
@@ -152,7 +152,7 @@ loader: cluster/loader--job.yaml gatling/resources/users.csv gatling/resources/m
 
 
 # --- monitoring: the monitoring VirtualService must reside in istio's namespace
-monitoring: cluster/monitoring--vs.yaml
+monitoring: cluster/supplemental/monitoring--vs.yaml
 	kubectl -n $(ISTIO_NS) apply -f $<
 
 
