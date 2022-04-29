@@ -111,7 +111,7 @@ platform-config: etc/mesh.mak etc/obs.mak
 	make -f etc/obs.mak install-kiali
 	# Kiali operator can take awhile to start Kiali
 	tools/waiteq.sh 'app=kiali' '{.items[*]}'              ''        'Kiali' 'Created'
-	tools/waitne.sh 'app=kiali' '{.items[0].status.phase}' 'Running' 'Kiali' 'Running'
+	tools/waitne.sh 'app=kiali' '{.items[0].status.phase}' 'Running' 'Kiali' 'RUNNING'
 
 
 # --- app-config: perform app-specific setup. In our case:
@@ -119,7 +119,7 @@ platform-config: etc/mesh.mak etc/obs.mak
 #                 2. Create a Kubernetes namespace
 #                 3. Load the AWS credentials into a Kubernetes secret
 #                 4. Run the loader job to create the database fixtures
-#                 5. Grafana dashboard
+#                 5. Load a default Grafana dashboard into the cluster (as a Kubernetes configmap)
 app-config: nosql-tables appns credentials loader grafana-dashboard
 
 
@@ -144,7 +144,7 @@ credentials: cluster/awscred--secret.yaml
 	$(KCNS) apply -f $<
 
 
-# --- credentials: Run the loader job to create the database fixtures
+# --- credentials: Run the loader (one-time) job to create the database fixtures
 loader: cluster/loader--job.yaml gatling/resources/users.csv gatling/resources/music.csv
 	$(KCNS) delete --ignore-not-found=true jobs/cmpt756loader
 	$(KCNS) create configmap users --from-file=gatling/resources/users.csv || true
@@ -153,6 +153,7 @@ loader: cluster/loader--job.yaml gatling/resources/users.csv gatling/resources/m
 
 
 # --- grafana-dashboard: Sidecar loads all ConfigMaps with the label grafana_dashboard 
+#                        (As with other similar invocations, the "|| true" is an idempotent cheat)
 grafana-dashboard: etc/config/k8s-dashboard.json 
 	kubectl -n $(ISTIO_NS) create configmap c756-dashboard --from-file=etc/config/k8s-dashboard.json || true
 	kubectl -n $(ISTIO_NS) label configmap c756-dashboard --overwrite=true grafana_dashboard=1
