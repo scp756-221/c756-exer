@@ -1,0 +1,33 @@
+#
+# SFU CMPT 756
+#
+# Istio yaml to deploy a VirtualService
+#
+# DestinationRule lists the subset destination Kubernetes Services
+# that will receive traffic from the Istio VirtualService.
+# VirtualService routes URLs to the destinations, splitting the traffic
+# across destinations according to weights.
+#
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: cmpt756s2
+spec:
+  host: cmpt756s2
+  subsets:
+  - name: v1
+    labels:
+      version: v1
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 1
+      http:
+        http1MaxPendingRequests: 1
+        maxRequestsPerConnection: 1
+    outlierDetection:
+      consecutive5xxErrors: 1
+      interval: 1s
+      baseEjectionTime: 3m
+      maxEjectionPercent: 100
+

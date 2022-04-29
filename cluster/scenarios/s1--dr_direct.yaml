@@ -1,0 +1,15 @@
+#
+# SFU CMPT 756
+#
+# An empty DestinationRule to indicate a direct (no circuit breaker) connection
+#
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: cmpt756s1
+spec:
+  host: cmpt756s1
+  subsets:
+  - name: v1
+    labels:
+      version: v1
