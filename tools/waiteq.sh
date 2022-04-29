@@ -9,7 +9,7 @@ then
 fi
 while [ "$(kubectl get -n istio-system pods -l ${1} -o jsonpath=${2})" = "${3}" ]
 do
-    echo "${4} not yet ${5}. Sleeping 1 s"
-    sleep 1
+    echo "${4} not yet ${5}. Sleeping 5 s"
+    sleep 5
 done
 echo "${4} is ${5}"

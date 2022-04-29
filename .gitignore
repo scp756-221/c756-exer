@@ -1,4 +1,4 @@
-k8s.mak
+Makefile
 eks.mak
 az.mak
 mk.mak
@@ -7,3 +7,4 @@ allclouds.mak
 api.mak
 .DS_Store
 __pycache__
+gatling-[0-9]*-{user,music}.sh

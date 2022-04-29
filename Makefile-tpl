@@ -1,0 +1,358 @@
+#
+# Front-end to bring some sanity to the litany of tools and switches
+# for working with a k8s cluster. Note that this file exercise core k8s
+# commands that's independent of the cluster vendor.
+#
+# This is the top-level Makefile for CMPT 756's course material
+#
+# It uses
+# 
+#   {eks.mak, aks.mak or gcp.mak} to provide the Kubernetes platform
+#   mesh.mak to install istio as the service mesh
+#   obs.mak to install the observability components (Promethesis & Kiali)
+#
+# Be sure to set your context appropriately for the log monitor.
+#
+# The intended approach to working with this makefile is to update select
+# elements (body, id, IP, port, etc) as you progress through your workflow.
+
+# ---------------------
+# Variable between the lines are filled in by the template processor
+CREG=ZZ-CR-ID
+REGID=ZZ-REG-ID
+STACKNAME=db-ZZ-REG-ID
+AWS_REGION=ZZ-AWS-REGION
+# ---------------------
+
+
+# ---------------------
+# These are optional overrides; adjust them for your term project?
+AWSPROF=--profile default
+PLATFORM=eks.mak
+# ---------------------
+
+# Keep all the logs out of main directory
+LOG_DIR=logs
+
+
+# Kubernetes parameters that most of the time will be unchanged
+# but which you might override as projects become sophisticated
+APP_NS=c756ns
+ISTIO_NS=istio-system
+
+# These should be in your search path
+AWSPR=aws $(AWSPROF) --region $(REGION)
+DK=docker
+IC=istioctl
+KCNS=kubectl -n $(APP_NS)
+
+
+# Application versions
+# Override these by environment variables and `make -e`
+APP_VER_TAG=v1
+S2_VER=v1
+LOADER_VER=v1
+
+# this is used to switch M1 Mac to x86 for compatibility with x86 instances/students
+ARCH=--platform x86_64
+
+
+# ----------------------------------------------------------------------------------------
+# -------  Target usable PRIOR to template instantiation                           -------
+# ----------------------------------------------------------------------------------------
+
+templates:
+	tools/process-templates.sh
+
+
+# ----------------------------------------------------------------------------------------
+# -------  Targets usable AFTER template instantiation:                            -------
+# ----------------------------------------------------------------------------------------
+
+# --- start: Start a Kubernetes cluster on your chosen platform. (Default is AWS EKS.)
+start:	$(PLATFORM)
+	make -f $< start
+
+# --- stop: Stop the Kubernetes cluster on your chosen platform. (Default is AWS EKS.)
+stop:	$(PLATFORM)
+	make -f $< stop
+
+
+all: provision
+
+# --- clean: clean up the local log directories
+clean:
+	rm -f $(LOG_DIR)/{s1,s2,db,gw,monvs}*.log $(LOG_DIR)/rollout*.log
+
+# --- deepclean: clean local and cloud side
+deepclean: clean
+	$(AWSPR) cloudformation delete-stack --stack-name $(STACKNAME) || true | tee $(LOG_DIR)/dynamodb-clean.log
+
+
+# --- ls: Show deploy, pods, vs, and svc of application ns
+ls: 
+	$(KCNS) get gw,vs,svc,deployments,pods
+
+# --- provision: bring everything up in one shot 
+provision: platform-config app-config monitoring deploy
+
+# --- bounce: restart everything
+bounce: bounce-s1 bounce-s2 bounce-db
+
+# --- platform-config: perform a first-time setup of istio, Prometheus, Kiali & Grafana in your Kubernetes cluster
+#                      Subsequently, a deploy will suffice.
+platform-config: mesh.mak obs.mak
+	# install istio
+	make -f mesh.mak install-istio
+	# install Prometheus & Kiali
+	make -f obs.mak init-helm --no-print-directory
+	make -f obs.mak install-prom --no-print-directory
+	make -f obs.mak install-kiali
+	# Kiali operator can take awhile to start Kiali
+	tools/waiteq.sh 'app=kiali' '{.items[*]}'              ''        'Kiali' 'Created'
+	tools/waitne.sh 'app=kiali' '{.items[0].status.phase}' 'Running' 'Kiali' 'Running'
+
+
+# --- app-config: perform app-specific setup. In our case:
+#                 1. Create the DynamoDB tables (via AWS CloudFormation)
+#                 2. Create a Kubernetes namespace
+#                 3. Load the AWS credentials into a Kubernetes secret
+#                 4. Run the loader job to create the database fixtures
+app-config: nosql-tables appns credentials loader
+
+
+# --- nosql-tables: Create the DynamoDB tables (via AWS CloudFormation)
+nosql-tables: cluster/supplemental/cf-dyndb.json 
+	# we add a || true to cheat on the non-idempotent create-stack
+	$(AWSPR) cloudformation create-stack --stack-name $(STACKNAME) --template-body file://$< || true
+	sleep 20
+	$(AWSPR) dynamodb list-tables
+
+
+# --- appns: Create a Kubernetes namespace to organize the resources for the app
+#            NB: $(KCNS) packs in the namespace
+appns:
+	kubectl create ns $(APP_NS) || true
+	kubectl label ns $(APP_NS) --overwrite=true istio-injection=enabled
+	kubectl get ns --show-labels
+
+
+# --- credentials: Load the AWS credentials into a Kubernetes secret
+#                  (the credentials are needed only by the db service)
+credentials: cluster/awscred--secret.yaml
+	$(KCNS) apply -f $<
+
+
+# --- credentials: Run the loader job to create the database fixtures
+loader: cluster/loader--job.yaml gatling/resources/users.csv gatling/resources/music.csv
+	$(KCNS) delete --ignore-not-found=true jobs/cmpt756loader
+	$(KCNS) create configmap users --from-file=gatling/resources/users.csv
+	$(KCNS) create configmap music --from-file=gatling/resources/music.csv
+	$(KCNS) apply -f $<
+
+
+# --- monitoring: the monitoring VirtualService must reside in istio's namespace
+monitoring: cluster/monitoring--vs.yaml
+	kubectl -n $(ISTIO_NS) apply -f $<
+
+
+# ----------------------------------------------------------------------------------------
+# -------  The core of the app follows from this point on:                         -------
+# ----------------------------------------------------------------------------------------
+
+# --- deploy: a full deploy comprise the gateway and the apis themselves
+deploy: gateway apis
+
+
+# --- gateway: the istio gateway 
+gateway: cluster/service--gw.yaml
+	$(KCNS) apply -f $<
+
+# --- apis: there are both public and private apis
+apis: publicapi privateapi
+
+# --- publicapi: these are wired up to the gateway
+publicapi: service1 service2 
+
+# --- privateapi: these are only accessible from inside the cluster
+privateapi: servicedb
+
+# --- service1: the user service comprises several resources:
+#                 Deployment 
+#                 ServiceAccount
+#                 Service
+#                 VirtualService
+#                 ServiceMonitor
+service1: cluster/s1--deploy-sa-svc.yaml cluster/s1--vs.yaml cluster/s1--sm.yaml
+	$(KCNS) apply -f cluster/s1--deploy-sa-svc.yaml 
+	$(KCNS) apply -f cluster/s1--vs.yaml
+	$(KCNS) apply -f cluster/s1--sm.yaml
+
+# --- service2: the music service comprises several resources:
+#                 Deployment 
+#                 ServiceAccount
+#                 Service
+#                 VirtualService
+#                 DestinationRule
+#                 ServiceMonitor
+#               service2 is organized slightly differently to showcase canary deployment.
+#               Notably, the deployment also includes a version label.
+service2: cluster/s2--deploy_$(S2_VER).yaml cluster/s2--sa-svc.yaml cluster/s2--vs-dr.yaml cluster/s2--sm.yaml
+	$(KCNS) apply -f cluster/s2--deploy_$(S2_VER).yaml
+	$(KCNS) apply -f cluster/s2--sa-svc.yaml
+	$(KCNS) apply -f cluster/s2--vs-dr.yaml 
+	$(KCNS) apply -f cluster/s2--sm.yaml
+
+
+# --- servicedb: the database service comprises several resources:
+#                 Deployment 
+#                 ServiceAccount
+#                 Service
+#                 VirtualService
+#                 ServiceMonitor
+#                Also embedded for convenience here are:
+#                 loader ServiceAccount;
+#                 DynamoDB's VirtualService and ServiceEntry
+servicedb: cluster/db--deploy-sa-svc-etc.yaml cluster/db--vs.yaml cluster/db--sm.yaml cluster/dyndb--se-vs.yaml
+	$(KCNS) apply -f cluster/db--deploy-sa-svc-etc.yaml 
+	$(KCNS) apply -f cluster/db--vs.yaml 
+	$(KCNS) apply -f cluster/db--sm.yaml
+	$(KCNS) apply -f cluster/dyndb--se-vs.yaml
+
+# --- bounce-s1: restart the s1 service
+bounce-s1:
+	$(KCNS) rollout -n $(APP_NS) restart deployment/cmpt756s1
+
+# --- bounce-s2: restart the s2 service
+bounce-s2: cluster/s2--deploy_$(S2_VER).yaml
+	$(KCNS) -n $(APP_NS) apply -f cluster/s2--deploy_$(S2_VER).yaml 
+	$(KCNS) rollout -n $(APP_NS) restart deployment/cmpt756s2-$(S2_VER)
+
+# --- bounce-db: restart the db service
+bounce-db:
+	$(KCNS) rollout -n $(APP_NS) restart deployment/cmpt756db
+
+
+# --- scratch: Delete the microservices and everything else in application NS
+scratch: clean
+	$(KCNS) delete deploy --all
+	$(KCNS) delete svc    --all
+	$(KCNS) delete gw     --all
+	$(KCNS) delete dr     --all
+	$(KCNS) delete vs     --all
+	$(KCNS) delete se     --all
+	kubectl -n $(ISTIO_NS) delete vs monitoring --ignore-not-found=true
+	# show outcome/progress too
+	$(KCNS) get deploy,svc,pods,gw,dr,vs,se
+	kubectl get -n $(ISTIO_NS) vs
+
+# --- dashboard: Start the standard Kubernetes dashboard
+# NOTE:  Before invoking this, the dashboard must be installed and a service account created
+# dashboard: 
+# 	echo Please follow instructions at https://docs.aws.amazon.com/eks/latest/userguide/dashboard-tutorial.html
+# 	echo Remember to 'pkill kubectl' when you are done!
+# 	$(KCNS) proxy &
+# 	open http://localhost:8001/api/v1/namespaces/kubernetes-dashboard/services/https:kubernetes-dashboard:/proxy/#!/login
+
+# --- extern: Display status of the istio ingress gateway
+extern: 
+	$(KCNS) -n $(ISTIO_NS) get svc istio-ingressgateway
+
+
+# --- log-X: show the log of a particular service
+log-s1:
+	$(KCNS) logs deployment/cmpt756s1 --container cmpt756s1
+
+log-s2:
+	$(KCNS) logs deployment/cmpt756s2 --container cmpt756s2
+
+log-db:
+	$(KCNS) logs deployment/cmpt756db --container cmpt756db
+
+
+# --- shell-X: hint for shell into a particular service
+shell-s1:
+	@echo Use the following command line to drop into the s1 service:
+	@echo \$ $(KCNS) exec -it deployment/cmpt756s1 --container cmpt756s1 -- bash
+
+shell-s2:
+	@echo Use the following command line to drop into the s2 service:
+	@echo \$ $(KCNS) exec -it deployment/cmpt756s2 --container cmpt756s2 -- bash
+
+shell-db:
+	@echo Use the following command line to drop into the db service:
+	@echo "        $(KCNS) exec -it deployment/cmpt756db --container cmpt756db -- bash"
+
+
+# --- registry-login: Login to the container registry
+#
+registry-login:
+	@/bin/sh -c 'cat cluster/${CREG}-token.txt | $(DK) login $(CREG) -u $(REGID) --password-stdin'
+
+
+# --- Variables defined for URL targets
+# Utility to get the hostname (AWS) or IP (everyone else) of a load-balanced service
+# Must be followed by a service
+IP_GET_CMD=tools/getip.sh kubectl $(ISTIO_NS)
+
+# This expression is reused several times
+# Use back-tick for subshell so as not to confuse with make $() variable notation
+INGRESS_IP=`$(IP_GET_CMD) svc/istio-ingressgateway`
+
+
+# --- urls: Fetch all URLs in alphabetical order
+urls: grafana-url kiali-url prometheus-url
+
+
+# --- kiali-url: Print the URL to browse Kiali in current cluster
+kiali-url:
+	@/bin/sh -c 'echo http://$(INGRESS_IP)/kiali'
+
+# --- grafana-url: Print the URL to browse Grafana in current cluster
+grafana-url:
+	@# Use back-tick for subshell so as not to confuse with make $() variable notation
+	@/bin/sh -c 'echo http://`$(IP_GET_CMD) svc/grafana-ingress`:3000/'
+
+# --- prometheus-url: Print the URL to browse Prometheus in current cluster
+prometheus-url:
+	@# Use back-tick for subshell so as not to confuse with make $() variable notation
+	@/bin/sh -c 'echo http://`$(IP_GET_CMD) svc/prom-ingress`:9090/'
+
+
+
+# --- cri: Build & push all images up to the CR
+#          Note the use the log files to detect when the service has updated.
+#          When in doubt, 'make clean' before 'make cri'! 
+cri: $(LOG_DIR)/s1.repo.log $(LOG_DIR)/s2-$(S2_VER).repo.log $(LOG_DIR)/db.repo.log
+
+# --- $(LOG_DIR)/s1.repo.log: Build and push the s1 service's image
+$(LOG_DIR)/s1.repo.log: s1/Dockerfile s1/app.py s1/requirements.txt
+	make --no-print-directory registry-login
+	$(DK) build $(ARCH) -t $(CREG)/$(REGID)/cmpt756s1:$(APP_VER_TAG) s1 | tee $(LOG_DIR)/s1.img.log
+	$(DK) push $(CREG)/$(REGID)/cmpt756s1:$(APP_VER_TAG) | tee $(LOG_DIR)/s1.repo.log
+
+# --- $(LOG_DIR)/s2.repo.log: Build and push the s2 service's image
+$(LOG_DIR)/s2-$(S2_VER).repo.log: s2/$(S2_VER)/Dockerfile s2/$(S2_VER)/app.py s2/$(S2_VER)/requirements.txt
+	make --no-print-directory registry-login
+	$(DK) build $(ARCH) -t $(CREG)/$(REGID)/cmpt756s2:$(S2_VER) s2/$(S2_VER) | tee $(LOG_DIR)/s2-$(S2_VER).img.log
+	$(DK) push $(CREG)/$(REGID)/cmpt756s2:$(S2_VER) | tee $(LOG_DIR)/s2-$(S2_VER).repo.log
+
+# --- $(LOG_DIR)/db.repo.log: Build and push the db service's image
+$(LOG_DIR)/db.repo.log: db/Dockerfile db/app.py db/requirements.txt
+	make --no-print-directory registry-login
+	$(DK) build $(ARCH) -t $(CREG)/$(REGID)/cmpt756db:$(APP_VER_TAG) db | tee $(LOG_DIR)/db.img.log
+	$(DK) push $(CREG)/$(REGID)/cmpt756db:$(APP_VER_TAG) | tee $(LOG_DIR)/db.repo.log
+
+# --- $(LOG_DIR)/loader.repo.log: Build and push the loader's image
+$(LOG_DIR)/loader.repo.log: loader/app.py loader/requirements.txt loader/Dockerfile registry-login
+	$(DK) build $(ARCH) -t $(CREG)/$(REGID)/cmpt756loader:$(LOADER_VER) loader  | tee $(LOG_DIR)/loader.img.log
+	$(DK) push $(CREG)/$(REGID)/cmpt756loader:$(LOADER_VER) | tee $(LOG_DIR)/loader.repo.log
+
+
+# Push all the container images to the container registry
+# This isn't often used because the individual build targets also push
+# the updated images to the registry
+cr: registry-login
+	$(DK) push $(CREG)/$(REGID)/cmpt756s1:$(APP_VER_TAG) | tee $(LOG_DIR)/s1.repo.log
+	$(DK) push $(CREG)/$(REGID)/cmpt756s2:$(S2_VER) | tee $(LOG_DIR)/s2.repo.log
+	$(DK) push $(CREG)/$(REGID)/cmpt756db:$(APP_VER_TAG) | tee $(LOG_DIR)/db.repo.log
