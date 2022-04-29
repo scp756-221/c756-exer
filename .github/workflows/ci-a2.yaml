@@ -27,7 +27,7 @@ jobs:
         # For A2, only need ZZ-REG-ID to instantiate s2/standalone/unique_code-tpl.py
         run: |
           sed -e "s/ZZ-REG-ID=.*/ZZ-REG-ID=${{ env.canonical-owner }}/" cluster/tpl-vars-blank.txt > cluster/tpl-vars.txt
-          make -f k8s-tpl.mak templates
+          make -f Makefile-tpl templates
 
       - name: Build server
         run: |
