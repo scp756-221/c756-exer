@@ -159,9 +159,13 @@ grafana-dashboard: etc/config/k8s-dashboard.json
 	kubectl -n $(ISTIO_NS) label configmap c756-dashboard --overwrite=true grafana_dashboard=1
 
 
-# --- monitoring: the monitoring VirtualService must reside in istio's namespace
-monitoring: etc/config/monitoring--vs.yaml
+# --- monitoring: The monitoring VirtualService must reside in istio's namespace
+#                 Each service's ServiceMonitor can collocate with its own resource.
+monitoring: etc/config/monitoring--vs.yaml cluster/s1--sm.yaml cluster/s2--sm.yaml cluster/db--sm.yaml
 	kubectl -n $(ISTIO_NS) apply -f $<
+	$(KCNS) apply -f cluster/s1--sm.yaml
+	$(KCNS) apply -f cluster/s2--sm.yaml
+	$(KCNS) apply -f cluster/db--sm.yaml
 
 
 # ----------------------------------------------------------------------------------------
@@ -190,11 +194,9 @@ privateapi: servicedb
 #                 ServiceAccount
 #                 Service
 #                 VirtualService
-#                 ServiceMonitor
 service1: cluster/s1--deploy-sa-svc.yaml cluster/s1--vs.yaml cluster/s1--sm.yaml
 	$(KCNS) apply -f cluster/s1--deploy-sa-svc.yaml 
 	$(KCNS) apply -f cluster/s1--vs.yaml
-	$(KCNS) apply -f cluster/s1--sm.yaml
 
 # --- service2: the music service comprises several resources:
 #                 Deployment 
@@ -202,14 +204,17 @@ service1: cluster/s1--deploy-sa-svc.yaml cluster/s1--vs.yaml cluster/s1--sm.yaml
 #                 Service
 #                 VirtualService
 #                 DestinationRule
-#                 ServiceMonitor
 #               service2 is organized slightly differently to showcase canary deployment.
 #               Notably, the deployment also includes a version label.
-service2: cluster/s2--deploy_$(S2_VER).yaml cluster/s2--sa-svc.yaml cluster/s2--vs-dr.yaml cluster/s2--sm.yaml
-	$(KCNS) apply -f cluster/s2--deploy_$(S2_VER).yaml
+service2: cluster/s2--deploy_v1.yaml cluster/scenarios/s2--deploy_v2.yaml cluster/s2--sa-svc.yaml cluster/s2--vs-dr.yaml cluster/s2--sm.yaml
+ifeq ($(S2_VER), "v1")
+	$(KCNS) apply -f cluster/s2--deploy_v1.yaml
+endif
+ifeq ($(S2_VER), "v2")
+	$(KCNS) apply -f cluster/scenarios/s2--deploy_v2.yaml
+endif
 	$(KCNS) apply -f cluster/s2--sa-svc.yaml
 	$(KCNS) apply -f cluster/s2--vs-dr.yaml 
-	$(KCNS) apply -f cluster/s2--sm.yaml
 
 
 # --- servicedb: the database service comprises several resources:
@@ -217,27 +222,32 @@ service2: cluster/s2--deploy_$(S2_VER).yaml cluster/s2--sa-svc.yaml cluster/s2--
 #                 ServiceAccount
 #                 Service
 #                 VirtualService
-#                 ServiceMonitor
 #                Also embedded for convenience here are:
-#                 loader ServiceAccount;
+#                 loader's ServiceAccount;
 #                 DynamoDB's VirtualService and ServiceEntry
 servicedb: cluster/db--deploy-sa-svc-etc.yaml cluster/db--vs.yaml cluster/db--sm.yaml cluster/dyndb--se-vs.yaml
 	$(KCNS) apply -f cluster/db--deploy-sa-svc-etc.yaml 
 	$(KCNS) apply -f cluster/db--vs.yaml 
-	$(KCNS) apply -f cluster/db--sm.yaml
 	$(KCNS) apply -f cluster/dyndb--se-vs.yaml
 
 # --- bounce-s1: Restart the s1 service
 bounce-s1:
 	$(KCNS) rollout -n $(APP_NS) restart deployment/cmpt756s1
 
+
 # --- bounce-s2: Restart the s2 service (rebuild if necessary).
 #                NB: the dependency on $(LOG_DIR)/s2-$(S2_VER).repo.log here triggers a
 #                    build/push of the image if the service's source changes. Refer to the 
 #                    dependency of $(LOG_DIR)/s2-$(S2_VER).repo.log further down.
-bounce-s2: $(LOG_DIR)/s2-$(S2_VER).repo.log cluster/s2--deploy_$(S2_VER).yaml
-	$(KCNS) -n $(APP_NS) apply -f cluster/s2--deploy_$(S2_VER).yaml 
+bounce-s2: cluster/s2--deploy_v1.yaml cluster/scenarios/s2--deploy_v2.yaml
+ifeq ($(S2_VER), "v1")
+	$(KCNS) apply -f cluster/s2--deploy_v1.yaml
+endif
+ifeq ($(S2_VER), "v2")
+	$(KCNS) apply -f cluster/scenarios/s2--deploy_v2.yaml
+endif
 	$(KCNS) rollout -n $(APP_NS) restart deployment/cmpt756s2-$(S2_VER)
+
 
 # --- bounce-db: restart the db service
 bounce-db:

@@ -1,4 +1,4 @@
-FROM quay.io/bitnami/python:3.8.6-prod-debian-10-r81
+FROM docker.io/python:3.8.6-slim
 
 WORKDIR /code
 

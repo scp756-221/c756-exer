@@ -59,8 +59,7 @@ start:
 	date | tee  $(LOG_DIR)/az-start.log
 	az group create -o table --location $(LOC) --name $(GRP)  | tee -a $(LOG_DIR)/az-start.log
 	$(AKS) create --resource-group $(GRP) -o table \
-		--location $(LOC) --kubernetes-version $(KVER) \
-		--name $(CLUSTER_NAME) \
+		--kubernetes-version $(KVER) --name $(CLUSTER_NAME) \
 		--node-count $(NUM_NODES) --node-vm-size $(NTYPE) --generate-ssh-keys | tee -a $(LOG_DIR)/az-start.log
 	$(AKS) get-credentials --resource-group $(GRP) --name $(CLUSTER_NAME) \
 		--context $(AZ_CTX) --overwrite-existing | tee -a $(LOG_DIR)/az-start.log
