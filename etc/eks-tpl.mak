@@ -25,7 +25,7 @@ NGROUP=worker-nodes
 
 EKR=eksctl --region $(REGION)
 
-# --- start: create a cluster with a single nodegroup as specified
+# --- start: create a cluster with a single node group as specified
 start: showcontext
 	$(EKR) create cluster --version $(KVER) --name $(CLUSTER_NAME) \
 		--nodegroup-name $(NGROUP) --node-type $(NTYPE) \
@@ -41,27 +41,32 @@ startalt: cluster.yaml
 	eksctl create cluster -f cluster.yaml | tee $(LOG_DIR)/eks-startalt.log
 	# you may wish to rename your context
 
+
 # --- stop: stop your cluster
 stop:
 	$(EKR) delete cluster --name $(CLUSTER_NAME) | tee $(LOG_DIR)/eks-stop.log
 	kubectl config delete-context $(EKS_CTX) | tee -a $(LOG_DIR)/eks-stop.log
 
-# --- up: create a nodegroup; this may/need or may/need not be synchronized with the above
+
+# --- up: create an EKS node group; this may/need or may/need not be synchronized with the above
 up:
 	$(EKR) create nodegroup --cluster $(CLUSTER_NAME) \
 		--name $(NGROUP) --node-type $(NTYPE) \
 		--nodes 2 --nodes-min 2 --nodes-max 5 --managed | tee $(LOG_DIR)/eks-up.log
 
-# --- down: delete a nodegroup; this may/need or may/need not be synchronized with the above
+
+# --- down: delete an EKS node group; this may/need or may/need not be synchronized with the above
 down:
 	$(EKR) delete nodegroup --cluster=$(CLUSTER_NAME) --name=$(NGROUP) | tee $(LOG_DIR)/eks-down.log
-
-
-# --- lsl: Show all AWS clusters and nodegroups
-lsl: 
-	$(EKR) get nodegroup --cluster $(CLUSTER_NAME)
 
 
 # --- ls: Show all AWS clusters
 ls:
 	$(EKR) get cluster -v 0
+
+
+# --- lsl: Show the AWS cluster's node group(s)
+lsl: 
+	$(EKR) get nodegroup --cluster $(CLUSTER_NAME)
+
+

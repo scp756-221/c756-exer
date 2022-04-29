@@ -44,6 +44,7 @@ fi
 # Step 3: Convert the files
 #
 find . -name '*-tpl.*' -exec ./tools/call-sed.sh '{}'  ${vals} \;
+find . -name 'Makefile-tpl' -exec ./tools/call-sed.sh '{}'  ${vals} \;
 #
 # Step 3: Cleanup
 #

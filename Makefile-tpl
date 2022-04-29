@@ -28,7 +28,7 @@ AWS_REGION=ZZ-AWS-REGION
 # ---------------------
 # These are optional overrides; adjust them for your term project?
 AWSPROF=--profile default
-PLATFORM=eks.mak
+PLATFORM=etc/eks.mak
 # ---------------------
 
 # Keep all the logs out of main directory
@@ -91,7 +91,7 @@ deepclean: clean
 
 # --- ls: Show deploy, pods, vs, and svc of application ns
 ls: 
-	$(KCNS) get gw,vs,svc,deployments,pods
+	$(KCNS) get gw,vs,svc,deployments,pods --show-labels
 
 # --- provision: bring everything up in one shot 
 provision: platform-config app-config monitoring deploy
@@ -101,13 +101,13 @@ bounce: bounce-s1 bounce-s2 bounce-db
 
 # --- platform-config: perform a first-time setup of istio, Prometheus, Kiali & Grafana in your Kubernetes cluster
 #                      Subsequently, a deploy will suffice.
-platform-config: mesh.mak obs.mak
+platform-config: etc/mesh.mak etc/obs.mak
 	# install istio
-	make -f mesh.mak install-istio
+	make -f etc/mesh.mak install-istio
 	# install Prometheus & Kiali
-	make -f obs.mak init-helm --no-print-directory
-	make -f obs.mak install-prom --no-print-directory
-	make -f obs.mak install-kiali
+	make -f etc/obs.mak init-helm --no-print-directory
+	make -f etc/obs.mak install-prom --no-print-directory
+	make -f etc/obs.mak install-kiali
 	# Kiali operator can take awhile to start Kiali
 	tools/waiteq.sh 'app=kiali' '{.items[*]}'              ''        'Kiali' 'Created'
 	tools/waitne.sh 'app=kiali' '{.items[0].status.phase}' 'Running' 'Kiali' 'Running'
@@ -118,11 +118,12 @@ platform-config: mesh.mak obs.mak
 #                 2. Create a Kubernetes namespace
 #                 3. Load the AWS credentials into a Kubernetes secret
 #                 4. Run the loader job to create the database fixtures
-app-config: nosql-tables appns credentials loader
+#                 5. Grafana dashboard
+app-config: nosql-tables appns credentials loader grafana-dashboard
 
 
 # --- nosql-tables: Create the DynamoDB tables (via AWS CloudFormation)
-nosql-tables: cluster/supplemental/cf-dyndb.json 
+nosql-tables: etc/config/cf-dyndb.json 
 	# we add a || true to cheat on the non-idempotent create-stack
 	$(AWSPR) cloudformation create-stack --stack-name $(STACKNAME) --template-body file://$< || true
 	sleep 20
@@ -130,7 +131,6 @@ nosql-tables: cluster/supplemental/cf-dyndb.json
 
 
 # --- appns: Create a Kubernetes namespace to organize the resources for the app
-#            NB: $(KCNS) packs in the namespace
 appns:
 	kubectl create ns $(APP_NS) || true
 	kubectl label ns $(APP_NS) --overwrite=true istio-injection=enabled
@@ -146,13 +146,19 @@ credentials: cluster/awscred--secret.yaml
 # --- credentials: Run the loader job to create the database fixtures
 loader: cluster/loader--job.yaml gatling/resources/users.csv gatling/resources/music.csv
 	$(KCNS) delete --ignore-not-found=true jobs/cmpt756loader
-	$(KCNS) create configmap users --from-file=gatling/resources/users.csv
-	$(KCNS) create configmap music --from-file=gatling/resources/music.csv
+	$(KCNS) create configmap users --from-file=gatling/resources/users.csv || true
+	$(KCNS) create configmap music --from-file=gatling/resources/music.csv || true
 	$(KCNS) apply -f $<
 
 
+# --- grafana-dashboard: Sidecar loads all ConfigMaps with the label grafana_dashboard 
+grafana-dashboard: etc/config/k8s-dashboard.json 
+	kubectl -n $(ISTIO_NS) create configmap c756-dashboard --from-file=etc/config/k8s-dashboard.json || true
+	kubectl -n $(ISTIO_NS) label configmap c756-dashboard --overwrite=true grafana_dashboard=1
+
+
 # --- monitoring: the monitoring VirtualService must reside in istio's namespace
-monitoring: cluster/supplemental/monitoring--vs.yaml
+monitoring: etc/config/monitoring--vs.yaml
 	kubectl -n $(ISTIO_NS) apply -f $<
 
 
@@ -318,6 +324,16 @@ prometheus-url:
 	@# Use back-tick for subshell so as not to confuse with make $() variable notation
 	@/bin/sh -c 'echo http://`$(IP_GET_CMD) svc/prom-ingress`:9090/'
 
+
+
+# --- duser: 
+	USER_ID2=${1} make -f api.mak -e duser
+
+# --- cmusic: 
+	ARTIST=${1} SONGTITLE=${2} make -f api.mak -e cmusic
+
+# --- dmusic: 
+	MUSIC_ID2=${1} make -f api.mak -e dmusic
 
 
 # --- cri: Build & push all images up to the CR

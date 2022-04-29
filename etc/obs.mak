@@ -41,26 +41,22 @@ init-helm:
 # note that the name $(RELEASE) is discretionary; it is used to reference the install 
 # Grafana is included within this Prometheus package
 install-prom:
-	$(HELM) install $(RELEASE) -f cluster/supplemental/helm-kube-stack-values.yaml --namespace $(ISTIO_NS) prometheus-community/kube-prometheus-stack | tee -a $(LOG_DIR)/obs-install-prometheus.log
-	kubectl apply -n $(ISTIO_NS) -f cluster/supplemental/monitoring--svcs.yaml | tee -a $(LOG_DIR)/obs-install-prometheus.log
-	kubectl -n $(ISTIO_NS) create configmap c756-dashboard --from-file=cluster/supplemental/k8s-dashboard.json || true
-#   Sidecar loads all ConfigMaps with the label grafana_dashboard
-	kubectl -n $(ISTIO_NS) label configmap c756-dashboard --overwrite=true grafana_dashboard=1
+	$(HELM) install $(RELEASE) -f etc/config/helm-kube-stack-values.yaml --namespace $(ISTIO_NS) prometheus-community/kube-prometheus-stack | tee -a $(LOG_DIR)/obs-install-prometheus.log
+	kubectl apply -n $(ISTIO_NS) -f etc/config/monitoring--svcs.yaml | tee -a $(LOG_DIR)/obs-install-prometheus.log
 
 
 uninstall-prom:
 	$(HELM) uninstall $(RELEASE) --namespace $(ISTIO_NS) | tee -a $(LOG_DIR)/obs-uninstall-prometheus.log
-	kubectl -n $(ISTIO_NS) delete configmap c756-dashboard 
 
 install-kiali:
 	# This will fail every time after the first---the "|| true" suffix keeps Make running despite error
 	kubectl create namespace $(KIALI_OP_NS) || true  | tee -a $(LOG_DIR)/obs-kiali.log
 	$(HELM) install --set cr.create=true --set cr.namespace=$(ISTIO_NS) --namespace $(KIALI_OP_NS) \
 		--repo https://kiali.org/helm-charts --version $(KIALI_VER) kiali-operator kiali-operator | tee -a $(LOG_DIR)/obs-kiali.log
-	kubectl apply -n $(ISTIO_NS) -f cluster/supplemental/kiali--cr.yaml | tee -a $(LOG_DIR)/obs-kiali.log
+	kubectl apply -n $(ISTIO_NS) -f etc/config/kiali--cr.yaml | tee -a $(LOG_DIR)/obs-kiali.log
 	
 update-kiali:
-	kubectl apply -n $(ISTIO_NS) -f cluster/supplemental/kiali--cr.yaml | tee -a $(LOG_DIR)/obs-kiali.log
+	kubectl apply -n $(ISTIO_NS) -f etc/config/kiali--cr.yaml | tee -a $(LOG_DIR)/obs-kiali.log
 
 uninstall-kiali:
 	$(HELM) uninstall kiali-operator --namespace $(KIALI_OP_NS) | tee -a $(LOG_DIR)/obs-uninstall-kiali.log
