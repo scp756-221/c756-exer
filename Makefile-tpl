@@ -83,6 +83,7 @@ all: provision
 # --- clean: clean up the local log directories
 clean:
 	rm -f $(LOG_DIR)/{s1,s2,db,gw,monvs}*.log $(LOG_DIR)/rollout*.log
+	rm -fr gatling/results/*
 
 # --- deepclean: clean local and cloud side
 deepclean: clean
