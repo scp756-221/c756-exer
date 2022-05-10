@@ -277,7 +277,7 @@ scratch: clean
 
 # --- extern: Display status of the istio ingress gateway
 extern: 
-	$(KCNS) -n $(ISTIO_NS) get svc istio-ingressgateway
+	kubectl -n $(ISTIO_NS) get svc istio-ingressgateway
 
 
 # --- log-X: show the log of a particular service
