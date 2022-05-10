@@ -342,12 +342,15 @@ prometheus-url:
 
 
 # --- duser: 
+duser:
 	USER_ID2=${1} make -f api.mak -e duser
 
 # --- cmusic: 
+cmusic:
 	ARTIST=${1} SONGTITLE=${2} make -f api.mak -e cmusic
 
 # --- dmusic: 
+dmusic:
 	MUSIC_ID2=${1} make -f api.mak -e dmusic
 
 
