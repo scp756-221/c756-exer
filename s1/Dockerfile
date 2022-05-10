@@ -9,4 +9,6 @@ COPY app.py .
 
 EXPOSE 30000
 
-CMD ["python", "app.py", "30000"]
+COPY entrypoint.sh /usr/local/bin/
+ENTRYPOINT ["entrypoint.sh"]
+CMD ["default"]

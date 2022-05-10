@@ -19,4 +19,6 @@ EXPOSE 30001
 ARG EXERARG=v0.75
 ENV EXER=${EXERARG}
 
-CMD ["python", "app.py", "30001"]
+COPY entrypoint.sh /usr/local/bin/
+ENTRYPOINT ["entrypoint.sh"]
+CMD ["default"]

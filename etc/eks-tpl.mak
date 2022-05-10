@@ -26,12 +26,12 @@ NGROUP=worker-nodes
 EKR=eksctl --region $(REGION)
 
 # --- start: create a cluster with a single node group as specified
-start: showcontext
+start: 
 	$(EKR) create cluster --version $(KVER) --name $(CLUSTER_NAME) \
 		--nodegroup-name $(NGROUP) --node-type $(NTYPE) \
 		--nodes 2 --nodes-min 2 --nodes-max 5 --managed | tee $(LOG_DIR)/eks-start.log
 	# Use back-ticks for subshell because $(...) notation is used by make
-	kubectl config rename-context `$(KC) config current-context` $(EKS_CTX) | tee -a $(LOG_DIR)/eks-start.log
+	kubectl config rename-context `kubectl config current-context` $(EKS_CTX) | tee -a $(LOG_DIR)/eks-start.log
 
 
 # --- startalt: create a cluster using YAML files to provide finer control of nodegroup(s)

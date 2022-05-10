@@ -2,7 +2,7 @@
 # initial music list already in the image.
 # Such an image can be run anywhere without
 # mapping an external volume. 
-FROM quay.io/bitnami/python:3.8.6-prod-debian-10-r81
+FROM docker.io/python:3.8.6-slim
 
 WORKDIR /code
 
@@ -17,4 +17,6 @@ COPY music.csv /data
 #VOLUME /data
 EXPOSE 30001
 
-CMD ["python", "app.py", "30001"]
+COPY entrypoint.sh /usr/local/bin/
+ENTRYPOINT ["entrypoint.sh"]
+CMD ["default"]
